@@ -116,65 +116,27 @@ jobs:
 
     - name: Build packages
       run: make ${{ matrix.platform.make-targets }}
-    # Do not do versioning for Pre-Release packages
-    - name: Rename Pre-Release Packages
-      if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
-      run: make package-rename
-    - name: Pre-Release
-      uses: softprops/action-gh-release@v2
-      if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
-      with:
-        prerelease: true
-        name: Continuous Release
-        tag_name: continuous-release
-        files: |
-          bb-imager-gui/dist/*
-          bb-imager-cli/dist/*
-          bb-imager-service/dist/*
-    - name: Release
-      uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        generate_release_notes: true
-        files: |
-          bb-imager-gui/dist/*
-          bb-imager-cli/dist/*
-          bb-imager-service/dist/*
 
-  linux-cross:
-    strategy:
-      matrix:
-        platform:
-          - os-name: Linux arm
-            runs-on: ubuntu-24.04
-            target: armv7-unknown-linux-gnueabihf
-            # cargo packager does not seem to work with appimage on arm32 right now
-            formats: -f deb -f pacman
-            features: -F bcf_msp430 -F bcf_cc1352p7
-    name: Build Artifacts - ${{ matrix.platform.os-name }}
-    runs-on: ${{ matrix.platform.runs-on }}
-    env:
-      NO_BUILD: 1
-      BCF_CC1352P7: 1
-      BCF_MSP430: 1
-      TARGET: ${{ matrix.platform.target }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        lfs: true
-    - name: Build binary
-      uses: houseabsolute/actions-rust-cross@v1
-      with:
-        command: build
-        target: ${{ matrix.platform.target }}
-        args: "--locked --release ${{ matrix.platform.features }} -p bb-imager-cli -p bb-imager-gui"
-        strip: true
-    - name: Install packaging deps
-      run: make setup-packaging-deps
-    - name: Build packages
-      run: make package-cli-linux-targz package-cli-linux-deb package-gui-linux-targz package-gui-linux-deb 
-    # Do not do versioning for Pre-Release packages
+    - name: Notarize and Staple macOS DMG
+      if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/')
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_PASSWORD: ${{ secrets.APP_PASSWORD }}
+        TEAM_ID: ${{ secrets.TEAM_ID }}
+      run: |
+        for dmg in bb-imager-gui/dist/*.dmg; do
+          echo "Submitting $dmg for notarization..."
+          xcrun notarytool submit "$dmg" \
+            --keychain-profile "AC_PASSWORD" \
+            --wait
+
+          echo "Stapling $dmg..."
+          xcrun stapler staple "$dmg"
+
+          echo "Validating stapled $dmg..."
+          xcrun stapler validate "$dmg"
+        done
+
     - name: Rename Pre-Release Packages
       if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
       run: make package-rename
